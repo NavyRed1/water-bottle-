@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Water bottle 3D</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#e9e2d4;--ink:#2e2a25;--pill:#fffaf1;--accent:#4a4fb5;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#101a22;--ink:#e9eff1;--pill:#22323b}}
+:root[data-theme="dark"]{--bg:#101a22;--ink:#e9eff1;--pill:#22323b}
+html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none;background:var(--bg);color:var(--ink);font-family:"Bricolage Grotesque",system-ui,sans-serif}
+canvas{position:fixed;inset:0;touch-action:none;display:block}
+.hint{position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 84px);text-align:center;font-size:13px;opacity:.65;pointer-events:none;transition:opacity .6s;padding:0 16px}
+.hint.gone{opacity:0}
+.seg,.dock{position:fixed;left:50%;transform:translateX(-50%);display:flex;gap:2px;padding:4px;border-radius:999px;background:color-mix(in srgb,var(--pill) 82%,transparent);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 2px 14px rgba(0,0,0,.14);max-width:calc(100vw - 20px);overflow-x:auto;scrollbar-width:none}
+.seg{top:calc(env(safe-area-inset-top,0px) + 14px)}
+.dock{bottom:calc(env(safe-area-inset-bottom,0px) + 18px)}
+button{font:inherit;font-weight:500;font-size:14px;color:var(--ink);background:transparent;border:0;border-radius:999px;padding:8px 14px;cursor:pointer;white-space:nowrap}
+button:hover{background:rgba(127,127,127,.18)}
+button[aria-pressed="true"]{background:var(--accent);color:#fff}
+button:focus-visible{outline:3px solid var(--accent);outline-offset:1px}
+@media (max-width:520px){button{padding:8px 10px;font-size:13px}}
+</style>
+</head>
+<body>
+<div class="seg" id="types" role="group" aria-label="Container"></div>
+<p class="hint" id="hint">Drag the container to swing and pour it. Drag the background to look around.</p>
+<div class="dock" role="toolbar" aria-label="Controls">
+  <button id="cap" aria-pressed="false">Cap</button>
+  <button id="refill">Refill</button>
+  <button id="shake">Shake</button>
+  <button id="tap" aria-pressed="false">Faucet</button>
+  <button id="moon" aria-pressed="false">Low gravity</button>
+  <button id="theme">Dark</button>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(()=>{
+const $=q=>document.querySelector(q);
+const N=160,R=8,RW=10.5,D=17,PM=.09,H0=1/300,WZ=140;
+let G=1800,capped=false,acc=0,last=0,drag=null,orbit=null,mx=0,my=0,WX=300,dist=560,th=0,ph=1.38,mode='light';
+const liq=new THREE.Color(),wh=new THREE.Color(0xffffff),cc=new THREE.Color();let shakeT=0,tap=false,tapT=0,tapI=0;
+let M=8,I=52000,NA=N,P,n,SEG,CAPSEG,pts=[],yb,yt,rmax,TY;
+const lab=(bg,fg,a,b)=>c=>{c.fillStyle=bg;c.fillRect(0,0,256,128);c.fillStyle=fg;c.textAlign='center';c.font='700 38px "Bricolage Grotesque",system-ui,sans-serif';c.fillText(a,128,62);c.font='500 26px "Bricolage Grotesque",system-ui,sans-serif';c.fillText(b,128,98)};
+// each container: profile [y, radius] lip to base, cap [rTop,rBottom,height,colour], liquid colour, mass, inertia
+const TYPES=[
+{n:'Water bottle',P:[[130,17],[104,17],[94,20],[84,27],[74,35],[66,41],[58,44.5],[50,45],[-96,45],[-104,42],[-109,36],[-110,30]],glass:[0xdff3ff,.3],cap:[21,21,26,0x4a4fb5],label:{r:45.6,h:46,y:8,s:-.9,l:1.8,f:lab('#fffdf8','#1b5f7a','Still water','500 ml')},liq:0x2a9fe0,M:8,I:52000,top:60,fill:110},
+{n:'Soda can',P:[[80,34],[75,38],[68,42],[60,43],[-60,43],[-68,42],[-75,38],[-80,34]],metal:0xd8232a,cap:[34,34,3,0xc9ced3],label:{r:43.5,h:100,y:0,s:-1.3,l:2.6,f:lab('#d8232a','#fff','FIZZ','12 fl oz')},liq:0xc8602a,M:5,I:13750,top:70,fill:70},
+{n:'Wine bottle',P:[[150,14],[130,14],[120,15],[108,17],[96,21],[80,29],[65,36],[52,40],[44,41],[-110,41],[-117,38],[-122,32],[-123,27]],glass:[0x3d8f55,.5],cap:[15,15,22,0xb98b55],label:{r:41.6,h:66,y:-50,s:-.75,l:1.5,f:lab('#efe3c8','#5a1226','Rouge','2019')},liq:0x7a1030,M:9,I:61000,top:0,fill:80},
+{n:'Flask',P:[[130,17],[104,17],[96,18],[80,22],[40,33],[0,43],[-40,54],[-80,64],[-92,62],[-98,56],[-100,48]],glass:[0xdff3ff,.24],cap:[19,16,24,0xc4552d],liq:0x8be04e,M:7,I:40400,top:-10,fill:100}];
+const hwAt=y=>{if(y>=P[0][0])return P[0][1];for(let i=1;i<n;i++)if(y>=P[i][0]){const a=P[i-1],b=P[i];return a[1]+(b[1]-a[1])*(y-a[0])/(b[0]-a[0])}return P[n-1][1]};
+const buildPts=()=>{pts=[];for(let i=0;i<n;i++){const[y,r]=P[i];pts.push([-r,y],[r,y]);if(i<n-1){const my=(y+P[i+1][0])/2,mr=(r+P[i+1][1])/2;pts.push([-mr,my],[mr,my])}}
+  const rl=P[n-1][1];pts.push([-rl/2,yb],[0,yb],[rl/2,yb]);
+  if(capped){const rt=TY.cap[0],ct=yt+TY.cap[2]-2;pts.push([-rt,ct],[0,ct],[rt,ct],[-rt,yt],[rt,yt])}};
+const X=new Float32Array(N),Y=new Float32Array(N),Z=new Float32Array(N),PX=new Float32Array(N),PY=new Float32Array(N),PZ=new Float32Array(N);
+const B={x:0,y:190,a:.4,vx:0,vy:0,w:0};
+
+// ---------- three.js scene ----------
+const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;document.body.prepend(renderer.domElement);
+const scene=new THREE.Scene();scene.background=new THREE.Color();scene.fog=new THREE.Fog(0xffffff,900,2000);
+const cam=new THREE.PerspectiveCamera(40,1,10,4000);
+const hemi=new THREE.HemisphereLight(0xffffff,0x887766,.9),key=new THREE.DirectionalLight(0xffffff,1.1);
+key.position.set(-250,500,300);key.castShadow=true;key.shadow.mapSize.set(1024,1024);
+Object.assign(key.shadow.camera,{left:-450,right:450,top:450,bottom:-450,near:10,far:1500});
+scene.add(hemi,key);
+// soft studio reflections for the glass
+const ec=document.createElement('canvas');ec.width=256;ec.height=128;const e2=ec.getContext('2d');
+let gr=e2.createLinearGradient(0,0,0,128);gr.addColorStop(0,'#fff');gr.addColorStop(1,'#556');e2.fillStyle=gr;e2.fillRect(0,0,256,128);
+e2.fillStyle='#fff';e2.fillRect(30,25,36,70);e2.fillRect(150,30,60,50);e2.fillStyle='#223';e2.fillRect(100,10,14,100);
+const et=new THREE.CanvasTexture(ec);et.mapping=THREE.EquirectangularReflectionMapping;
+const env=new THREE.PMREMGenerator(renderer).fromEquirectangular(et).texture;
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(5000,5000),new THREE.MeshStandardMaterial({roughness:.95}));
+floor.rotation.x=-Math.PI/2;floor.receiveShadow=true;scene.add(floor);
+const bc=document.createElement('canvas');bc.width=bc.height=64;const b2=bc.getContext('2d');
+gr=b2.createRadialGradient(32,32,2,32,32,32);gr.addColorStop(0,'rgba(0,0,0,.55)');gr.addColorStop(1,'rgba(0,0,0,0)');b2.fillStyle=gr;b2.fillRect(0,0,64,64);
+const blob=new THREE.Mesh(new THREE.PlaneGeometry(150,150),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(bc),transparent:true,depthWrite:false}));
+blob.rotation.x=-Math.PI/2;blob.position.y=.5;scene.add(blob);
+
+const bottle=new THREE.Group();scene.add(bottle);
+const matG=new THREE.MeshPhysicalMaterial({transparent:true,roughness:.04,metalness:0,clearcoat:1,envMap:env,side:THREE.DoubleSide,depthWrite:false});
+const matM=new THREE.MeshStandardMaterial({metalness:.85,roughness:.3,envMap:env,side:THREE.DoubleSide});
+const glass=new THREE.Mesh(new THREE.BufferGeometry(),matG);bottle.add(glass);
+const lc=document.createElement('canvas');lc.width=256;lc.height=128;const l2=lc.getContext('2d'),lt=new THREE.CanvasTexture(lc);
+const label=new THREE.Mesh(new THREE.BufferGeometry(),new THREE.MeshStandardMaterial({map:lt,transparent:true,opacity:.95,side:THREE.DoubleSide,roughness:.5,metalness:.2}));bottle.add(label);
+const capM=new THREE.Mesh(new THREE.BufferGeometry(),new THREE.MeshStandardMaterial({roughness:.45,metalness:.1}));capM.castShadow=true;capM.visible=false;bottle.add(capM);
+function setType(k){TY=TYPES[k];P=TY.P;n=P.length;yb=P[n-1][0];yt=P[0][0];rmax=Math.max(...P.map(p=>p[1]));
+  SEG=[];for(let i=0;i<n-1;i++)SEG.push([P[i][1],P[i][0],P[i+1][1],P[i+1][0]]);SEG.push([0,yb,P[n-1][1],yb]);CAPSEG=[0,yt,P[0][1],yt];
+  M=TY.M;I=TY.I;NA=TY.fill;wm.count=NA;liq.set(TY.liq);
+  const q=[[0,yb]];for(let i=n-1;i>=0;i--){const[y,r]=P[i],pv=q[q.length-1],st=Math.ceil(Math.abs(y-pv[1])/35);
+    for(let j=1;j<st;j++)q.push([pv[0]+(r-pv[0])*j/st,pv[1]+(y-pv[1])*j/st]);q.push([r,y])}
+  glass.geometry.dispose();glass.geometry=new THREE.LatheGeometry(new THREE.SplineCurve(q.map(p=>new THREE.Vector2(...p))).getPoints(Math.max(80,q.length*6)),64);
+  if(TY.metal){glass.material=matM;matM.color.set(TY.metal)}else{glass.material=matG;matG.color.set(TY.glass[0]);matG.opacity=TY.glass[1]}
+  label.visible=!!TY.label;if(TY.label){const L=TY.label;label.geometry.dispose();label.geometry=new THREE.CylinderGeometry(L.r,L.r,L.h,48,1,true,L.s,L.l);label.position.y=L.y;L.f(l2);lt.needsUpdate=true}
+  const c=TY.cap;capM.geometry.dispose();capM.geometry=new THREE.CylinderGeometry(c[0],c[1],c[2],40);capM.position.y=yt+c[2]/2-2;capM.material.color.set(c[3]);
+  capped=false;capM.visible=false;capB.setAttribute('aria-pressed',false);buildPts();
+  B.x=0;B.y=Math.max(190,80-yb);B.a=.4;B.vx=B.vy=B.w=0;acc=0;tap=false;$('#tap').setAttribute('aria-pressed',false);fill();
+  [...$('#types').children].forEach((b,i)=>b.setAttribute('aria-pressed',i===k))}
+document.fonts&&document.fonts.ready.then(()=>{if(TY&&TY.label){TY.label.f(l2);lt.needsUpdate=true}});
+
+const wm=new THREE.InstancedMesh(new THREE.SphereGeometry(1,20,16),new THREE.MeshPhysicalMaterial({color:0xffffff,roughness:.04,transparent:true,opacity:.82,clearcoat:1,envMap:env}),N);
+wm.castShadow=true;wm.frustumCulled=false;scene.add(wm);const dm=new THREE.Object3D();dm.scale.setScalar(11);
+
+const T={light:{bg:0xe9e2d4,fl:0xdcd2bf,hm:.9,ky:1.1,env:1,water:0x2a9fe0},dark:{bg:0x101a22,fl:0x192832,hm:.4,ky:.75,env:.55,water:0x3bb6ff}};
+function theme(m){mode=m;document.documentElement.dataset.theme=m;const t=T[m];scene.background.set(t.bg);scene.fog.color.set(t.bg);floor.material.color.set(t.fl);
+  hemi.intensity=t.hm;key.intensity=t.ky;matG.envMapIntensity=matM.envMapIntensity=wm.material.envMapIntensity=t.env;
+  $('#theme').textContent=m==='dark'?'Light':'Dark'}
+function resize(){const w=innerWidth,h=innerHeight,a=w/h;renderer.setSize(w,h);cam.aspect=a;cam.updateProjectionMatrix();
+  const tn=Math.tan(20*Math.PI/180);dist=Math.max(560,135/(tn*a));WX=Math.max(90,Math.min(340,tn*dist*a-20))}
+function placeCam(){cam.position.set(dist*Math.sin(ph)*Math.sin(th),120+dist*Math.cos(ph),dist*Math.sin(ph)*Math.cos(th));cam.lookAt(0,120,0)}
+
+// ---------- physics ----------
+function fill(){let k=0;const c=Math.cos(B.a),s=Math.sin(B.a);
+  for(let ly=yb+RW;k<NA;ly+=13){if(ly>TY.top)break;const rm=hwAt(ly)-RW;
+    for(let gx=-rm;gx<=rm+.1;gx+=D)for(let gz=-rm;gz<=rm+.1;gz+=D){if(k>=NA)break;if(gx*gx+gz*gz>rm*rm+1)continue;
+      const lx=gx+(Math.random()-.5),lz=gz+(Math.random()-.5);
+      X[k]=PX[k]=B.x+c*lx-s*ly;Y[k]=PY[k]=B.y+s*lx+c*ly;Z[k]=PZ[k]=lz;k++}}
+  for(;k<NA;k++){X[k]=PX[k]=B.x;Y[k]=PY[k]=B.y+yb+20;Z[k]=PZ[k]=0}}
+
+function hit(nx,ny,cc){const c=Math.cos(B.a),s=Math.sin(B.a);let mp=0;
+  for(const[lx,ly]of pts){const rx=c*lx-s*ly,ry=s*lx+c*ly,sd=(B.x+rx)*nx+(B.y+ry)*ny-cc;if(sd>=0)continue;if(-sd>mp)mp=-sd;
+    const vn=(B.vx-B.w*ry)*nx+(B.vy+B.w*rx)*ny;if(vn>=0)continue;
+    const rn=rx*ny-ry*nx,j=-(1+(vn<-200?.3:0))*vn/(1/M+rn*rn/I);
+    B.vx+=nx*j/M;B.vy+=ny*j/M;B.w+=rn*j/I;
+    const tx=-ny,ty=nx,vt=(B.vx-B.w*ry)*tx+(B.vy+B.w*rx)*ty,rt=rx*ty-ry*tx;
+    let jt=-vt/(1/M+rt*rt/I);const mj=.5*j;jt=Math.max(-mj,Math.min(mj,jt));
+    B.vx+=tx*jt/M;B.vy+=ty*jt/M;B.w+=rt*jt/I}
+  if(mp>0){B.x+=nx*mp;B.y+=ny*mp}}
+
+function bottleStep(h){
+  if(drag){const c=Math.cos(B.a),s=Math.sin(B.a),rx=c*drag[0]-s*drag[1],ry=s*drag[0]+c*drag[1];
+    let dx=mx-(B.x+rx),dy=my-(B.y+ry);const dl=Math.hypot(dx,dy);if(dl>140){dx*=140/dl;dy*=140/dl}
+    const ax=90*dx-15*(B.vx-B.w*ry),ay=90*dy-15*(B.vy+B.w*rx);
+    B.vx+=ax*h;B.vy+=ay*h;B.w+=(rx*ay-ry*ax)*M/I*h}
+  if(shakeT>0){const q=Math.sin(shakeT*55);B.vx+=q*26000*h;B.vy+=Math.abs(q)*6000*h;B.w+=Math.cos(shakeT*40)*30*h;shakeT-=h}
+  B.vy-=G*h;B.vx*=1-.1*h;B.vy*=1-.1*h;B.w*=1-1.2*h;
+  const sp=Math.hypot(B.vx,B.vy);if(sp>1800){B.vx*=1800/sp;B.vy*=1800/sp}
+  B.w=Math.max(-10,Math.min(10,B.w));B.x+=B.vx*h;B.y+=B.vy*h;B.a+=B.w*h;
+  hit(0,1,0);hit(1,0,-WX);hit(-1,0,-WX);hit(0,-1,-700)}
+
+function water(h){
+  const c=Math.cos(B.a),s=Math.sin(B.a),gh=G*h*h,segs=capped?[...SEG,CAPSEG]:SEG;
+  for(let i=0;i<NA;i++){let vx=(X[i]-PX[i])*.9995,vy=(Y[i]-PY[i])*.9995-gh,vz=(Z[i]-PZ[i])*.9995;const sp=Math.hypot(vx,vy,vz);
+    if(sp>8){const k=8/sp;vx*=k;vy*=k;vz*=k}PX[i]=X[i];PY[i]=Y[i];PZ[i]=Z[i];X[i]+=vx;Y[i]+=vy;Z[i]+=vz}
+  for(let it=0;it<2;it++){
+    for(let i=0;i<NA;i++)for(let j=i+1;j<NA;j++){
+      const dx=X[j]-X[i],dy=Y[j]-Y[i],dz=Z[j]-Z[i],d2=dx*dx+dy*dy+dz*dz;if(d2>=D*D||d2<1e-8)continue;
+      const d=Math.sqrt(d2),k=(D-d)/d*.45,ox=dx*k,oy=dy*k,oz=dz*k;
+      X[i]-=ox;Y[i]-=oy;Z[i]-=oz;X[j]+=ox;Y[j]+=oy;Z[j]+=oz;
+      const ax=((X[j]-PX[j])-(X[i]-PX[i]))*.015,ay=((Y[j]-PY[j])-(Y[i]-PY[i]))*.015,az=((Z[j]-PZ[j])-(Z[i]-PZ[i]))*.015;
+      PX[i]-=ax;PY[i]-=ay;PZ[i]-=az;PX[j]+=ax;PY[j]+=ay;PZ[j]+=az}
+    for(let i=0;i<NA;i++){
+      const dx=X[i]-B.x,dy=Y[i]-B.y,lx=c*dx+s*dy,ly=-s*dx+c*dy,lz=Z[i],rho=Math.hypot(lx,lz);
+      if(rho<rmax+25&&ly<yt+45&&ly>yb-30){
+        const ex_=rho>1e-4?lx/rho:1,ez_=rho>1e-4?lz/rho:0;
+        for(const[r1,y1,r2,y2]of segs){const er=r2-r1,ey=y2-y1;
+          let t=((rho-r1)*er+(ly-y1)*ey)/(er*er+ey*ey);t=t<0?0:t>1?1:t;
+          const qr=r1+er*t,qy=y1+ey*t,dR=rho-qr,dY=ly-qy,d2=dR*dR+dY*dY;if(d2>=RW*RW)continue;
+          let d=Math.sqrt(d2),nr,nY;if(d<1e-4){const l=Math.hypot(er,ey);nr=ey/l;nY=-er/l;d=0}else{nr=dR/d;nY=dY/d}
+          const nlx=nr*ex_,nlz=nr*ez_,nx=c*nlx-s*nY,ny=s*nlx+c*nY,nz=nlz;
+          const qlx=qr*ex_,rx=c*qlx-s*qy,ry=s*qlx+c*qy,push=Math.min(RW-d,3);
+          const ux=X[i]-PX[i]+B.w*ry*h,uy=Y[i]-PY[i]-B.w*rx*h,uz=Z[i]-PZ[i],un=ux*nx+uy*ny+uz*nz;
+          X[i]+=nx*push;Y[i]+=ny*push;Z[i]+=nz*push;PX[i]+=nx*push;PY[i]+=ny*push;PZ[i]+=nz*push;
+          if(un<0){PX[i]+=nx*un;PY[i]+=ny*un;PZ[i]+=nz*un;const j=-un*PM/h*.8,jx=-nx*j,jy=-ny*j;
+            B.vx+=jx/M;B.vy+=jy/M;B.w+=(rx*jy-ry*jx)/I}
+          PX[i]+=(ux-nx*un)*.08;PY[i]+=(uy-ny*un)*.08;PZ[i]+=(uz-nz*un)*.08}}
+      if(Y[i]<R){Y[i]=R;if(Y[i]-PY[i]<0)PY[i]=Y[i];PX[i]+=(X[i]-PX[i])*.12;PZ[i]+=(Z[i]-PZ[i])*.12}
+      if(X[i]<-WX+R){X[i]=-WX+R;if(X[i]-PX[i]<0)PX[i]=X[i]}
+      if(X[i]>WX-R){X[i]=WX-R;if(X[i]-PX[i]>0)PX[i]=X[i]}
+      if(Z[i]<-WZ){Z[i]=-WZ;if(Z[i]-PZ[i]<0)PZ[i]=Z[i]}
+      if(Z[i]>WZ){Z[i]=WZ;if(Z[i]-PZ[i]>0)PZ[i]=Z[i]}}}}
+
+function frame(t){const dt=Math.min((t-last)/1000||0,.05);last=t;acc+=dt;let c=0;
+  while(acc>=H0&&c<12){bottleStep(H0);water(H0);acc-=H0;c++}if(c===12)acc=0;
+  bottle.position.set(B.x,B.y,0);bottle.rotation.z=B.a;
+  if(tap&&N>TY.fill){tapT+=dt;while(tapT>.035){tapT-=.035;const k=TY.fill+(tapI++%(N-TY.fill));X[k]=B.x+(Math.random()-.5)*4;Y[k]=330;Z[k]=(Math.random()-.5)*4;PX[k]=X[k];PY[k]=330+2.5;PZ[k]=Z[k]}}
+  for(let i=0;i<NA;i++){dm.position.set(X[i],Y[i],Z[i]);dm.updateMatrix();wm.setMatrixAt(i,dm.matrix);
+    cc.copy(liq).lerp(wh,Math.min(Math.hypot(X[i]-PX[i],Y[i]-PY[i],Z[i]-PZ[i])*.1,.65));wm.setColorAt(i,cc)}
+  wm.instanceMatrix.needsUpdate=true;wm.instanceColor.needsUpdate=true;
+  const ht=Math.max(0,B.y+yb);blob.position.x=B.x;blob.material.opacity=Math.max(0,1-ht/450);blob.scale.setScalar(1+ht*.003);
+  placeCam();renderer.render(scene,cam);requestAnimationFrame(frame)}
+
+// ---------- input ----------
+const el=renderer.domElement,rc=new THREE.Raycaster(),pl=new THREE.Plane(new THREE.Vector3(0,0,1),0),v3=new THREE.Vector3(),m2=new THREE.Vector2();
+const ray=e=>{m2.set(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1);rc.setFromCamera(m2,cam)};
+const planePt=e=>{ray(e);return rc.ray.intersectPlane(pl,v3)};
+el.addEventListener('pointerdown',e=>{$('#hint').classList.add('gone');ray(e);
+  if(rc.intersectObject(bottle,true).length&&planePt(e)){mx=v3.x;my=v3.y;const dx=mx-B.x,dy=my-B.y,c=Math.cos(B.a),s=Math.sin(B.a);
+    drag=[c*dx+s*dy,-s*dx+c*dy];el.style.cursor='grabbing'}
+  else orbit=[e.clientX,e.clientY];el.setPointerCapture(e.pointerId)});
+el.addEventListener('pointermove',e=>{
+  if(drag){if(planePt(e)){mx=v3.x;my=v3.y}}
+  else if(orbit){th=Math.max(-1,Math.min(1,th-(e.clientX-orbit[0])*.005));ph=Math.max(.9,Math.min(1.55,ph-(e.clientY-orbit[1])*.004));orbit=[e.clientX,e.clientY]}
+  else{ray(e);el.style.cursor=rc.intersectObject(bottle,true).length?'grab':'default'}});
+const up=()=>{drag=orbit=null;el.style.cursor='default'};el.addEventListener('pointerup',up);el.addEventListener('pointercancel',up);
+
+const capB=$('#cap'),moonB=$('#moon');
+capB.onclick=()=>{capped=!capped;capM.visible=capped;buildPts();capB.setAttribute('aria-pressed',capped)};
+$('#refill').onclick=()=>{NA=TY.fill;wm.count=NA;fill()};
+$('#shake').onclick=()=>{shakeT=.7};
+const tapB=$('#tap');tapB.onclick=()=>{tap=!tap;tapB.setAttribute('aria-pressed',tap);
+  if(tap&&NA<N){for(let k=NA;k<N;k++){X[k]=PX[k]=B.x;Y[k]=PY[k]=340+(k-NA)*18;Z[k]=PZ[k]=0}NA=N;wm.count=N}};
+moonB.onclick=()=>{const on=G===1800;G=on?380:1800;moonB.setAttribute('aria-pressed',on)};
+$('#theme').onclick=()=>theme(mode==='dark'?'light':'dark');
+addEventListener('resize',resize);
+
+TYPES.forEach((t,i)=>{const b=document.createElement('button');b.textContent=t.n;b.onclick=()=>setType(i);$('#types').append(b)});
+resize();theme(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');setType(0);
+if(matchMedia('(prefers-reduced-motion: reduce)').matches){B.a=0;B.y=1-yb;fill()}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
